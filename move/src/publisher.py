@@ -90,12 +90,9 @@ class RobotController(Node):
 
         # Anyways thanks for reading all that, here's the implementation lol:
         initial = Pose(position=Point(x=0.0, y=0.0, z=0.0), quaternion=Quaternion()) 
-        point1  = Pose(position=Point(x=5.0, y=5.0, z=0.0), quaternion=Quaternion())
-        point2  = Pose(position=Point(x=7.5, y=5.0, z=0.0), quaternion=Quaternion())
-        point3  = Pose(position=Point(x=9.5, y=1.0, z=0.0), quaternion=Quaternion())
-        point4  = Pose(position=Point(x=12.0, y=0.0, z=0.0), quaternion=Quaternion())
+        point1  = Pose(position=Point(x=5.0, y=7.0, z=0.0), quaternion=Quaternion())
         end     = Pose(position=Point(x=15.0, y=0.0, z=0.0), quaternion=Quaternion())
-        self.path = [initial, point1, point2, point3, point4, end]
+        self.path = [initial, point1, end]
         self.generate_spline(self.path, 2.0)
 
         # Then drive it on a timer:
@@ -107,10 +104,16 @@ class RobotController(Node):
         # One of the two onboard sensors reports 6D data. Find it (TASK 2.1).
         #
         self.robot_pos_sub = self.create_subscription(
-            "nav_msgs/msg/Odometry",
+            Odometry,
             "/model/vehicle_blue/odometry",
             self.on_robot_pos,
             qos_profile_sensor_data,
+        )
+        self.error_pub = self.create_subscription(
+            Float64,
+            "/error",
+            lambda x: None,
+            qos_profile_sensor_data  
         )
 
         # ---- TASK 2.3: where the measured-vs-actual error goes -------------
@@ -200,8 +203,13 @@ class RobotController(Node):
 
         TODO: decide what "delta" means here and justify it in a comment.
         """
-        raise NotImplementedError('TASK 2.3')
+        print(msg)
 
+        delta = 0.0
+        if delta > self.error_thresh:
+                error_msg = Float64()
+                error_msg.data = float(delta)
+                self.error_pub.publish(error_msg)
     # -----------------------------------------------------------------------
     # TASK 3.3 -- classify a single lidar point
     # -----------------------------------------------------------------------
