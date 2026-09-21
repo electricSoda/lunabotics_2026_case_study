@@ -90,7 +90,7 @@ class RobotController(Node):
 
         # Anyways thanks for reading all that, here's the implementation lol:
         initial = Pose(position=Point(x=0.0, y=0.0, z=0.0), quaternion=Quaternion()) 
-        point1  = Pose(position=Point(x=5.0, y=7.0, z=0.0), quaternion=Quaternion())
+        point1  = Pose(position=Point(x=5.0, y=10.0, z=0.0), quaternion=Quaternion())
         end     = Pose(position=Point(x=15.0, y=0.0, z=0.0), quaternion=Quaternion())
         self.path = [initial, point1, end]
         self.generate_spline(self.path, 2.0)
