@@ -22,7 +22,7 @@ from rclpy.qos import qos_profile_sensor_data
 
 from geometry_msgs.msg import Twist, Pose, Vector3, Point, Quaternion
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import PointCloud2, Imu
 from sensor_msgs_py import point_cloud2
 from std_msgs.msg import Float64
 
@@ -104,20 +104,25 @@ class RobotController(Node):
         # One of the two onboard sensors reports 6D data. Find it (TASK 2.1).
         #
         self.robot_pos_sub = self.create_subscription(
-            Odometry,
-            "/model/vehicle_blue/odometry",
+            Imu,
+            "/imu",
             self.on_robot_pos,
             qos_profile_sensor_data,
         )
-        self.error_pub = self.create_subscription(
-            Float64,
-            "/error",
-            lambda x: None,
-            qos_profile_sensor_data  
-        )
+        self.ground_truth = self.create_subscription(
+                    Odometry,
+                    "/model/vehicle_blue/odometry",
+                    self.calculate_delta,
+                    qos_profile_sensor_data,
+                )
+        self.pose = self.pose = Pose(
+                        position=Point(x=0.0, y=0.0, z=0.0),
+                        orientation=Quaternion(w=1.0, x=0.0, y=0.0, z=0.0)
+                    ) # starts at (0,0,0) with yaw of 0 degrees (assuming no roll or pitch)
+        self.velocity = Twist() # starts with 0 translational and rotational velocity
 
         # ---- TASK 2.3: where the measured-vs-actual error goes -------------
-        # self.error_pub = self.create_publisher(Float64, '/error', 10)
+        self.error_pub = self.create_publisher(Float64, '/error', 10)
         #
         # Hint: ground truth for "actual" is published by the simulator on the
         # robot's odometry topic (nav_msgs/Odometry). Deciding what to compare,
@@ -185,8 +190,6 @@ class RobotController(Node):
         local_vy = -vx * math.sin(target_yaw) + vy * math.cos(target_yaw)
         local_vz = vz
 
-        print(local_vx, local_vy, local_vz, target_yaw)
-
         twist = Twist(linear=Vector3(x=float(local_vx), y=float(local_vy), z=float(local_vz)), angular=Vector3(x=0.0, y=0.0, z=float(delta_yaw)))
 
         self.move_pub.publish(twist)
@@ -194,7 +197,39 @@ class RobotController(Node):
     # -----------------------------------------------------------------------
     # TASK 2.3 -- compare reported position against ground truth
     # -----------------------------------------------------------------------
-    def on_robot_pos(self, msg):
+    def add_vector(self, v1: Vector3, v2: Vector3):
+        return Vector3(x=v1.x+v2.x, y=v1.y+v2.y, z=v1.z+v2.z)
+
+    def scale_vector(self, v1: Vector3, c: float):
+        return Vector3(x=v1.x*c, y=v1.y*c, z=v1.z*c)
+
+    def convert_vec_to_quaternion(self, v: Vector3):
+        return Quaternion(w=0, x=v.x, y=v.y, z=v.z)
+
+    def add_quaternion(self, q1: Quaternion, q2: Quaternion):
+        return Quaternion(w=q1.w+q2.w, x=q1.x+q2.x, y=q1.y+q2.y, z=q1.z+q2.z)
+
+    def scale_quaternion(self, q1: Quaternion, c: float):
+        return Quaternion(w=q1.w*c, x=q1.x*c, y=q1.y*c, z=q1.z*c)
+
+    def multiply_quaternion(self, q1: Quaternion, q2: Quaternion):
+        return Quaternion(
+            w=q1.w * q2.w - q1.x * q2.x - q1.y * q2.y - q1.z * q2.z,
+            x=q1.w * q2.x + q1.x * q2.w + q1.y * q2.z - q1.z * q2.y,
+            y=q1.w * q2.y - q1.x * q2.z + q1.y * q2.w + q1.z * q2.x,
+            z=q1.w * q2.z + q1.x * q2.y - q1.y * q2.x + q1.z * q2.w
+        )
+
+    def inverse_quaternion(self, q: Quaternion):
+        return Quaternion(w=q.w, x=-q.x, y=-q.y, z=-q.z)
+
+    def norm_vector(self, v: Vector3):
+        return math.hypot(v.x, v.y, v.z)
+
+    def norm_quaternion(self, q: Quaternion):
+        return math.hypot(q.x, q.y, q.z, q.w)
+
+    def on_robot_pos(self, msg: Imu):
         """Compare the sensor's idea of where we are against the truth.
 
         Publish a Float64 on self.error_pub when the delta exceeds
@@ -202,13 +237,62 @@ class RobotController(Node):
 
         TODO: decide what "delta" means here and justify it in a comment.
         """
-        print(msg)
+        omega = msg.angular_velocity
+        accel = msg.linear_acceleration
+        dt = 0.1
+        omega = self.scale_vector(omega, dt)
 
-        delta = 0.0
-        if delta > self.error_thresh:
-                error_msg = Float64()
-                error_msg.data = float(delta)
-                self.error_pub.publish(error_msg)
+        self.pose.orientation = self.add_quaternion(
+            self.pose.orientation,
+            self.scale_quaternion(
+                self.scale_quaternion(
+                    self.multiply_quaternion(
+                        self.pose.orientation,
+                        self.convert_vec_to_quaternion(omega)
+                    ),
+                    0.5
+                ),
+                dt
+            )
+        )
+
+        norm = self.norm_quaternion(self.pose.orientation)
+
+        self.pose.orientation = Quaternion(
+            w=self.pose.orientation.w / norm,
+            x=self.pose.orientation.x / norm,
+            y=self.pose.orientation.y / norm,
+            z=self.pose.orientation.z / norm
+        )
+
+        self.velocity.linear = self.add_vector(self.velocity.linear, self.scale_vector(accel, dt))
+        self.pose.position = Point(x=self.pose.position.x+self.velocity.linear.x*dt, 
+                                   y=self.pose.position.y+self.velocity.linear.y*dt, 
+                                   z=self.pose.position.z+self.velocity.linear.z*dt)
+
+    def calculate_delta(self, msg: Odometry):
+        pose1 = self.pose
+        pose2 = msg.pose.pose
+        dx = pose2.position.x - pose1.position.x
+        dy = pose2.position.y - pose1.position.y
+        dz = pose2.position.z - pose1.position.z
+
+        delta_position = Vector3(x=dx, y=dy, z=dz)
+
+        q1_inv = self.inverse_quaternion(pose1.orientation)
+        delta_rotation = self.multiply_quaternion(
+            pose2.orientation,
+            q1_inv
+        )
+
+        delta = self.norm_vector(delta_position) 
+        delta_rotation = self.norm_quaternion(delta_rotation)
+        print(delta) 
+        if delta > self.error_thresh: # 0.5 cubic meters of error
+            error_msg = Float64()
+            error_msg.data = float(delta)
+            self.error_pub.publish(error_msg)
+            
     # -----------------------------------------------------------------------
     # TASK 3.3 -- classify a single lidar point
     # -----------------------------------------------------------------------
