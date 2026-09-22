@@ -181,7 +181,6 @@ class RobotController(Node):
         delta_yaw = target_yaw - self.prev_yaw
         delta_yaw = -math.atan2(math.sin(delta_yaw), math.cos(delta_yaw))
 
-        # Robot centric drive
         local_vx = vx * math.cos(target_yaw) + vy * math.sin(target_yaw)
         local_vy = -vx * math.sin(target_yaw) + vy * math.cos(target_yaw)
         local_vz = vz
