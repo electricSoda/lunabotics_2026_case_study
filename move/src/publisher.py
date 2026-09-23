@@ -90,8 +90,8 @@ class RobotController(Node):
 
         # Anyways thanks for reading all that, here's the implementation lol:
         initial = Pose(position=Point(x=0.0, y=0.0, z=0.0), quaternion=Quaternion()) 
-        point1  = Pose(position=Point(x=5.0, y=10.0, z=0.0), quaternion=Quaternion())
-        end     = Pose(position=Point(x=15.0, y=0.0, z=0.0), quaternion=Quaternion())
+        point1  = Pose(position=Point(x=5.0, y=7.5, z=0.0), quaternion=Quaternion())
+        end     = Pose(position=Point(x=12.5, y=0.0, z=0.0), quaternion=Quaternion())
         self.path = [initial, point1, end]
         self.generate_spline(self.path, 2.0)
 
@@ -123,6 +123,7 @@ class RobotController(Node):
 
         # ---- TASK 2.3: where the measured-vs-actual error goes -------------
         self.error_pub = self.create_publisher(Float64, '/error', 10)
+        self.imu_pose_pub = self.create_publisher(Pose, "/imu_pose", 10)
         #
         # Hint: ground truth for "actual" is published by the simulator on the
         # robot's odometry topic (nav_msgs/Odometry). Deciding what to compare,
@@ -182,6 +183,7 @@ class RobotController(Node):
             vy = 0
             vz = 0
 
+        # No PID here ;-; pure open loop and hopes and prayers
         target_yaw = math.atan2(vy, vx)
         delta_yaw = target_yaw - self.prev_yaw
         delta_yaw = -math.atan2(math.sin(delta_yaw), math.cos(delta_yaw))
@@ -269,6 +271,8 @@ class RobotController(Node):
         self.pose.position = Point(x=self.pose.position.x+self.velocity.linear.x*dt, 
                                    y=self.pose.position.y+self.velocity.linear.y*dt, 
                                    z=self.pose.position.z+self.velocity.linear.z*dt)
+
+        self.imu_pose_pub.publish(self.pose)
 
     def calculate_delta(self, msg: Odometry):
         pose1 = self.pose
