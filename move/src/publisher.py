@@ -119,6 +119,7 @@ class RobotController(Node):
                         position=Point(x=0.0, y=0.0, z=0.0),
                         orientation=Quaternion(w=1.0, x=0.0, y=0.0, z=0.0)
                     ) # starts at (0,0,0) with yaw of 0 degrees (assuming no roll or pitch)
+        self.pose_timestamp = 0.0
         self.velocity = Twist() # starts with 0 translational and rotational velocity
 
         # ---- TASK 2.3: where the measured-vs-actual error goes -------------
@@ -239,6 +240,7 @@ class RobotController(Node):
 
         TODO: decide what "delta" means here and justify it in a comment.
         """
+        self.pose_timestamp = self.get_clock().now().nanoseconds / 1e9
         omega = msg.angular_velocity
         accel = msg.linear_acceleration
         dt = 0.1
@@ -273,8 +275,13 @@ class RobotController(Node):
                                    z=self.pose.position.z+self.velocity.linear.z*dt)
 
         self.imu_pose_pub.publish(self.pose)
+        print(self.pose.position)
 
     def calculate_delta(self, msg: Odometry):
+        # don't compare delta when imu reading is too far before ground truth measurement
+        # using very wide and heuristical values (0.3 seconds for this)
+        if abs(self.get_clock().now().nanoseconds / 1e9 - self.pose_timestamp) > 0.3: return
+
         pose1 = self.pose
         pose2 = msg.pose.pose
         dx = pose2.position.x - pose1.position.x
