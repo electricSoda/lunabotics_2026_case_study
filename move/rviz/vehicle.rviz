@@ -52,6 +52,19 @@ Visualization Manager:
       Color: 255; 25; 0
       Color Transformer: FlatColor
       Decay Time: 0
+    - Class: rviz_default_plugins/PointCloud2
+      Name: PointCloud2
+      Enabled: true
+      Topic:
+        Value: /obstacle_cloud
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+      Style: Points
+      Size (Pixels): 4.0
+      Color: 255; 25; 0
+      Color Transformer: FlatColor
+      Decay Time: 0
   Global Options:
     Background Color: 48; 48; 48
     Fixed Frame: odom

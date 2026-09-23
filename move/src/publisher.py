@@ -175,7 +175,6 @@ class RobotController(Node):
 
         TODO: build the Twist and publish it on self.move_pub.
         """
-        return # testing lidar stuff, so don't move robot
 
         elapsed = (self.get_clock().now() - self.start_time).nanoseconds / 1e9
         vx = float(self.interp_x(elapsed, 1))
@@ -344,7 +343,9 @@ class RobotController(Node):
         # print(points)
 
         # Doing Circle Hough Transform algorithm to detect circles
-        # My mac is trash
+        # my mac is trash
+        if not len(points):
+            return 
 
         padding = 1.0
         resolution = 0.05 # 0.1 meters
@@ -356,7 +357,7 @@ class RobotController(Node):
         width = self.discretize(abs(x_max - x_min), resolution)
         height = self.discretize(abs(y_max - y_min), resolution)
 
-        # Create pixel arrays that are discretized for (x,y)
+        # create pixel arrays that are discretized for (x,y)
         pixels_x = np.array([self.discretize(p-x_min, resolution) for p in points["x"]])
         pixels_y = np.array([height - 1 - self.discretize(p-y_min, resolution) for p in points["y"]])
 
@@ -395,10 +396,10 @@ class RobotController(Node):
         # plt.show()
 
         # print(circles)
-        if len(circles) != 1:
-            return # we only want one circle detection 
-
-        center = np.squeeze(circles)
+        
+        circles = np.float32(circles[0, :])
+        center = circles[np.argmin(circles[:, 2])]
+        
         center_x = (self.dedescretize(np.array([center[0]]), resolution) + x_min)[0]
         center_y = (self.dedescretize(np.array([height - 1 - center[1]]), resolution) + y_min)[0]
         radius = self.dedescretize(np.array([center[2]]), resolution)[0]
