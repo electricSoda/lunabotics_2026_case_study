@@ -28,6 +28,8 @@ from std_msgs.msg import Float64
 
 from scipy.interpolate import Akima1DInterpolator
 import numpy as np
+import cv2 as cv
+import matplotlib.pyplot as plt
 
 
 class RobotController(Node):
@@ -134,14 +136,14 @@ class RobotController(Node):
         # The lidar has a single vertical sample, so this cloud is one flat
         # row of points at the sensor's height -- not a 3D volume.
         #
-        # self.lidar_sub = self.create_subscription(
-        #     PointCloud2,
-        #     '/lidar/points',
-        #     self.on_lidar,
-        #     qos_profile_sensor_data,
-        # ) 
-        # self.obstacle_pub = self.create_publisher(
-        #     PointCloud2, '/obstacle_cloud', 10)
+        self.lidar_sub = self.create_subscription(
+            PointCloud2,
+            '/lidar/points',
+            self.on_lidar,
+            qos_profile_sensor_data,
+        ) 
+        self.obstacle_pub = self.create_publisher(
+            PointCloud2, '/obstacle_cloud', 10)
 
         self.get_logger().info(
             'robot_controller started (scaffold -- nothing wired up yet)')
@@ -173,6 +175,7 @@ class RobotController(Node):
 
         TODO: build the Twist and publish it on self.move_pub.
         """
+        return # testing lidar stuff, so don't move robot
 
         elapsed = (self.get_clock().now() - self.start_time).nanoseconds / 1e9
         vx = float(self.interp_x(elapsed, 1))
@@ -275,7 +278,6 @@ class RobotController(Node):
                                    z=self.pose.position.z+self.velocity.linear.z*dt)
 
         self.imu_pose_pub.publish(self.pose)
-        print(self.pose.position)
 
     def calculate_delta(self, msg: Odometry):
         # don't compare delta when imu reading is too far before ground truth measurement
@@ -298,7 +300,7 @@ class RobotController(Node):
 
         delta = self.norm_vector(delta_position) 
         delta_rotation = self.norm_quaternion(delta_rotation)
-        print(delta) 
+        # print(delta) 
         if delta > self.error_thresh: # 0.5 cubic meters of error
             error_msg = Float64()
             error_msg.data = float(delta)
@@ -315,11 +317,19 @@ class RobotController(Node):
 
         TODO: decide what separates a pole from the barrier and implement it.
         """
-        raise NotImplementedError('TASK 3.3')
+        print(point)
 
     # -----------------------------------------------------------------------
     # TASK 3.2 -- filter the scan and republish what matters
     # -----------------------------------------------------------------------
+    def discretize(self, point, resolution):
+        point = np.array(point)
+        return np.floor(point / resolution).astype(int)
+
+    def dedescretize(self, point, resolution):
+        point = np.array(point)
+        return (point + 0.5) * resolution
+    
     def on_lidar(self, msg):
         """Filter incoming points through is_obstacle and republish.
 
@@ -329,7 +339,82 @@ class RobotController(Node):
 
         TODO: keep only the obstacle points and publish on self.obstacle_pub.
         """
-        raise NotImplementedError('TASK 3.2')
+        points = point_cloud2.read_points(msg, field_names=('x', 'y'), skip_nans=True)
+        points = np.array([p for p in points if p["x"] != float("inf") and p["y"] != float("inf")])
+        # print(points)
+
+        # Doing Circle Hough Transform algorithm to detect circles
+        # My mac is trash
+
+        padding = 1.0
+        resolution = 0.05 # 0.1 meters
+        x_min = np.min(points["x"]) - padding
+        y_min = np.min(points["y"]) - padding
+        x_max = np.max(points["x"]) + padding
+        y_max = np.max(points["y"]) + padding
+
+        width = self.discretize(abs(x_max - x_min), resolution)
+        height = self.discretize(abs(y_max - y_min), resolution)
+
+        # Create pixel arrays that are discretized for (x,y)
+        pixels_x = np.array([self.discretize(p-x_min, resolution) for p in points["x"]])
+        pixels_y = np.array([height - 1 - self.discretize(p-y_min, resolution) for p in points["y"]])
+
+        binary_grid = np.zeros((height, width), dtype=np.uint8) # binary lidar data \
+        binary_grid[pixels_y, pixels_x] = 255
+
+        
+        circles = cv.HoughCircles(binary_grid,cv.HOUGH_GRADIENT, dp=1.3, minDist=20,
+                            param1=50,param2=10,minRadius=0,maxRadius=10)
+        if circles is None:
+            return 
+        circles = np.uint16(np.around(circles))   
+
+        # print(circles)
+
+
+        """
+        This graph is pretty cool
+        """
+        # fig, ax = plt.subplots(figsize=(8,8))
+        # ax.imshow(binary_grid, cmap="viridis", interpolation="nearest")
+        # circles = np.float32(circles[0, :])
+    
+        # for circle in circles:
+        #     center_x, center_y, radius = circle
+            
+        #     circle_patch = plt.Circle(
+        #         (center_x, center_y), 
+        #         radius, 
+        #         color='lime', 
+        #         fill=False, 
+        #         lw=2
+        #     )
+        #     ax.add_patch(circle_patch)
+
+        # plt.show()
+
+        # print(circles)
+        if len(circles) != 1:
+            return # we only want one circle detection 
+
+        center = np.squeeze(circles)
+        center_x = (self.dedescretize(np.array([center[0]]), resolution) + x_min)[0]
+        center_y = (self.dedescretize(np.array([height - 1 - center[1]]), resolution) + y_min)[0]
+        radius = self.dedescretize(np.array([center[2]]), resolution)[0]
+        # print(center_x, center_y, radius)
+
+        filtered_points = []
+        for point in points:
+            dist = math.hypot(center_x - point["x"], center_y - point["y"])
+            if dist < radius:
+                filtered_points.append((point[0], point[1], 0))
+
+        # print(filtered_points)
+        output = point_cloud2.create_cloud_xyz32(msg.header, filtered_points)
+        self.obstacle_pub.publish(output)
+
+        
 
 
 def main(args=None):
